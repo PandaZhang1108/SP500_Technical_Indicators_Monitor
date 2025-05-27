@@ -180,23 +180,35 @@ class DataLoader:
         
         # 如果本地文件存在且不强制下载，则加载本地文件
         if os.path.exists(file_path) and not force_download:
-            logger.info(f"从本地文件加载{symbol}数据")
-            df = pd.read_csv(file_path, index_col=0, parse_dates=True)
-            
-            # 检查是否需要更新数据
-            if df.index[-1].date() < (datetime.now() - timedelta(days=1)).date():
-                # 获取最新数据
-                logger.info(f"更新{symbol}数据")
-                start_date = (df.index[-1] + timedelta(days=1)).strftime('%Y-%m-%d')
-                end_date = datetime.now().strftime('%Y-%m-%d')
-                
-                new_data = self.get_stock_data(symbol, start_date, end_date)
-                if not new_data.empty:
-                    # 合并新旧数据
-                    df = pd.concat([df, new_data])
-                    # 保存更新后的数据
-                    df.to_csv(file_path)
-        else:
+            # 检查文件是否为空
+            if os.path.getsize(file_path) == 0:
+                logger.warning(f"本地文件 {file_path} 为空，将重新下载数据")
+                force_download = True
+            else:
+                try:
+                    logger.info(f"从本地文件加载{symbol}数据")
+                    df = pd.read_csv(file_path, index_col=0, parse_dates=True)
+                    
+                    # 检查是否需要更新数据
+                    if df.index[-1].date() < (datetime.now() - timedelta(days=1)).date():
+                        # 获取最新数据
+                        logger.info(f"更新{symbol}数据")
+                        start_date = (df.index[-1] + timedelta(days=1)).strftime('%Y-%m-%d')
+                        end_date = datetime.now().strftime('%Y-%m-%d')
+                        
+                        new_data = self.get_stock_data(symbol, start_date, end_date)
+                        if not new_data.empty:
+                            # 合并新旧数据
+                            df = pd.concat([df, new_data])
+                            # 保存更新后的数据
+                            df.to_csv(file_path)
+                except Exception as e:
+                    logger.error(f"加载本地数据文件时出错: {e}")
+                    logger.info("将重新下载数据")
+                    force_download = True
+        
+        # 如果需要下载数据（文件不存在、为空、无法解析或强制下载）
+        if not os.path.exists(file_path) or force_download:
             # 计算开始日期（默认10年前）
             start_date = (datetime.now() - timedelta(days=365 * lookback_years)).strftime('%Y-%m-%d')
             
@@ -207,6 +219,9 @@ class DataLoader:
             # 保存数据到本地
             if not df.empty:
                 df.to_csv(file_path)
+                logger.info(f"数据已保存到 {file_path}")
+            else:
+                logger.error(f"无法获取 {symbol} 的数据")
         
         return df
     
@@ -260,6 +275,15 @@ class DataLoader:
         """
         file_path = os.path.join(self.data_dir, 'position_history.csv')
         if os.path.exists(file_path):
-            return pd.read_csv(file_path, index_col=0, parse_dates=True)
+            # 检查文件是否为空
+            if os.path.getsize(file_path) == 0:
+                logger.warning(f"仓位历史文件 {file_path} 为空，返回空DataFrame")
+                return pd.DataFrame(columns=['position', 'signal_value', 'close', 'signal_type'])
+            
+            try:
+                return pd.read_csv(file_path, index_col=0, parse_dates=True)
+            except Exception as e:
+                logger.error(f"加载仓位历史文件时出错: {e}")
+                return pd.DataFrame(columns=['position', 'signal_value', 'close', 'signal_type'])
         else:
-            return pd.DataFrame(columns=['date', 'position', 'signal_value', 'close', 'signal_type'])
+            return pd.DataFrame(columns=['position', 'signal_value', 'close', 'signal_type'])
