@@ -84,19 +84,19 @@ jobs:
               body: body,
               labels: ['strategy-signal', 'automated-report']
             });
-            
-      # 如果设置了收件人邮箱，则通过邮件发送报告（使用 GitHub 的服务）
+      
+      # 简化的邮件发送步骤，不检查 EMAIL_RECIPIENT 是否为空      
       - name: Send notification email
-        if: ${{ secrets.EMAIL_RECIPIENT != '' }}
+        continue-on-error: true  # 即使邮件发送失败，也继续执行后续步骤
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
-          username: github-actions@github.com
+          username: ${{ secrets.EMAIL_SENDER || 'github-actions@github.com' }}
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: 【增强西格尔策略】信号更新 - ${{ steps.report.outputs.signal_type }} ${{ steps.report.outputs.position }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
-          from: GitHub Actions <github-actions@github.com>
+          from: GitHub Actions <${{ secrets.EMAIL_SENDER || 'github-actions@github.com' }}>
           body: |
             # 增强西格尔策略监控报告
             
