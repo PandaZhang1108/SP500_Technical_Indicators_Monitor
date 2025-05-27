@@ -19,7 +19,26 @@ from typing import Dict, Any
 from src.enhanced_siegel import EnhancedSiegelStrategy
 from src.data_loader import DataLoader
 from src.signal_analyzer import SignalAnalyzer
-from src.notification import EmailNotifier
+
+# 检查是否在 GitHub Actions 环境中运行
+def is_github_actions() -> bool:
+    """
+    检查是否在GitHub Actions环境中运行
+    
+    Returns:
+        是否在GitHub Actions中运行
+    """
+    return os.environ.get('GITHUB_ACTIONS') == 'true'
+
+# 只有在非 GitHub Actions 环境中才导入 EmailNotifier
+if not is_github_actions():
+    try:
+        from src.notification import EmailNotifier
+    except ImportError:
+        EmailNotifier = None
+        print("警告: 未能导入 EmailNotifier 类，邮件通知功能不可用")
+else:
+    EmailNotifier = None
 
 # 配置日志
 logging.basicConfig(
@@ -88,11 +107,11 @@ def load_config(config_file: str = 'config.ini') -> Dict[str, Any]:
                     else:
                         config[key] = parser['Notification'][key]
             
-            logger.info(f"已从 {config_file} 加载配置")
+            logger.info("已从 {} 加载配置".format(config_file))
         except Exception as e:
-            logger.error(f"读取配置文件时出错: {e}")
+            logger.error("读取配置文件时出错: {}".format(e))
     else:
-        logger.warning(f"配置文件 {config_file} 不存在，使用默认配置")
+        logger.warning("配置文件 {} 不存在，使用默认配置".format(config_file))
     
     # 环境变量优先级高于配置文件
     for env_var in ['FINNHUB_API_KEY', 'EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECIPIENT']:
@@ -110,7 +129,7 @@ def create_config_template(config_file: str = 'config.ini') -> None:
         config_file: 配置文件路径
     """
     if os.path.exists(config_file):
-        logger.warning(f"配置文件 {config_file} 已存在，跳过创建模板")
+        logger.warning("配置文件 {} 已存在，跳过创建模板".format(config_file))
         return
     
     config = configparser.ConfigParser()
@@ -158,17 +177,7 @@ def create_config_template(config_file: str = 'config.ini') -> None:
     with open(config_file, 'w') as f:
         config.write(f)
     
-    logger.info(f"已创建配置文件模板 {config_file}")
-
-
-def is_github_actions() -> bool:
-    """
-    检查是否在GitHub Actions环境中运行
-    
-    Returns:
-        是否在GitHub Actions中运行
-    """
-    return os.environ.get('GITHUB_ACTIONS') == 'true'
+    logger.info("已创建配置文件模板 {}".format(config_file))
 
 
 def main():
@@ -198,7 +207,7 @@ def main():
         data_loader = DataLoader(config)
         
         # 2. 获取股票数据
-        logger.info(f"获取 {config['symbol']} 的股票数据")
+        logger.info("获取 {} 的股票数据".format(config['symbol']))
         daily_data = data_loader.load_or_download_data(
             symbol=config['symbol'],
             lookback_years=int(config.get('lookback_years', 10)),
@@ -206,7 +215,7 @@ def main():
         )
         
         if daily_data.empty:
-            logger.error(f"无法获取 {config['symbol']} 的数据，退出")
+            logger.error("无法获取 {} 的数据，退出".format(config['symbol']))
             return
         
         # 3. 将日线数据转换为周线数据
@@ -241,7 +250,8 @@ def main():
            latest_signal['position'] != position_history.loc[latest_signal['date'], 'position']:
             position_history = pd.concat([position_history, new_position])
             data_loader.save_position_history(position_history)
-            logger.info(f"已更新仓位历史，当前仓位: {latest_signal['position']:.2f}")
+            position_value = latest_signal['position']
+            logger.info("已更新仓位历史，当前仓位: {:.2f}".format(position_value))
         
         # 9. 初始化信号分析器
         signal_analyzer = SignalAnalyzer(config)
@@ -254,25 +264,35 @@ def main():
         logger.info("信号报告:\n" + report_text)
         
         # 12. 生成图表
-        chart_path = os.path.join(config['charts_dir'], f"strategy_chart_{datetime.now().strftime('%Y%m%d')}.png")
+        current_date = datetime.now().strftime('%Y%m%d')
+        chart_path = os.path.join(config['charts_dir'], "strategy_chart_{}.png".format(current_date))
         signal_analyzer.plot_strategy_performance(results_df.tail(156), chart_path)  # 显示最近3年的数据
         
         # 生成交互式图表
-        interactive_chart_path = os.path.join(config['charts_dir'], f"interactive_chart_{datetime.now().strftime('%Y%m%d')}.html")
+        interactive_chart_path = os.path.join(config['charts_dir'], "interactive_chart_{}.html".format(current_date))
         signal_analyzer.plot_interactive_chart(results_df.tail(156), interactive_chart_path)
         
         # 13. 发送邮件通知（如果配置了邮件且未禁用，且不是在GitHub Actions中运行）
-        if not args.no_email and all([config.get('email_sender'), config.get('email_password'), config.get('email_recipient')]) and not is_github_actions():
-            logger.info("发送邮件通知")
-            notifier = EmailNotifier(config)
-            notifier.send_signal_email(latest_signal, report_text, chart_path)
+        if not args.no_email and not is_github_actions() and EmailNotifier is not None:
+            email_config_valid = all([
+                config.get('email_sender'), 
+                config.get('email_password'), 
+                config.get('email_recipient')
+            ])
+            
+            if email_config_valid:
+                logger.info("发送邮件通知")
+                notifier = EmailNotifier(config)
+                notifier.send_signal_email(latest_signal, report_text, chart_path)
+            else:
+                logger.warning("邮件配置不完整，跳过发送通知")
         elif is_github_actions():
             logger.info("在GitHub Actions环境中运行，邮件将由GitHub Actions发送")
         
         logger.info("策略执行完成")
         
     except Exception as e:
-        logger.exception(f"运行策略时出错: {e}")
+        logger.exception("运行策略时出错: {}".format(e))
         sys.exit(1)
 
 

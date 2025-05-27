@@ -159,120 +159,134 @@ class EmailNotifier:
         else:
             signal_color = "blue"
         
-        # 创建样式 CSS
-        css = """
-            body {
-                font-family: Arial, sans-serif;
-                line-height: 1.6;
-                color: #333;
-            }
-            .container {
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 20px;
-            }
-            .header {
-                background-color: #f5f5f5;
-                padding: 15px;
-                border-bottom: 2px solid #ddd;
-                margin-bottom: 20px;
-            }
-            .signal-box {
-                padding: 15px;
-                margin-bottom: 20px;
-                border-radius: 5px;
-                background-color: #f9f9f9;
-                border-left: 5px solid """ + signal_color + """;
-            }
-            .report {
-                white-space: pre-wrap;
-                font-family: monospace;
-                background-color: #f5f5f5;
-                padding: 15px;
-                border-radius: 5px;
-            }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 20px;
-            }
-            th, td {
-                padding: 10px;
-                border: 1px solid #ddd;
-                text-align: left;
-            }
-            th {
-                background-color: #f2f2f2;
-            }
-            .chart {
-                margin: 20px 0;
-                text-align: center;
-            }
-            .footer {
-                margin-top: 30px;
-                font-size: 0.8em;
-                color: #777;
-                text-align: center;
-            }
-        """
-        
         # 计算价格相对45周均线百分比
-        price_vs_ma = (close_price/signal_info['ma_long'] - 1) * 100
+        price_vs_ma = (close_price / signal_info['ma_long'] - 1) * 100
         
         # 生成时间
         generated_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        current_year = datetime.now().year
+        current_year = str(datetime.now().year)
         
-        # 创建HTML正文内容
-        html = f"""
+        # 创建 HTML 页头
+        html_head = """
         <html>
         <head>
             <style>
-            {css}
+                body {
+                    font-family: Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                .header {
+                    background-color: #f5f5f5;
+                    padding: 15px;
+                    border-bottom: 2px solid #ddd;
+                    margin-bottom: 20px;
+                }
+                .signal-box {
+                    padding: 15px;
+                    margin-bottom: 20px;
+                    border-radius: 5px;
+                    background-color: #f9f9f9;
+                    border-left: 5px solid """ + signal_color + """;
+                }
+                .report {
+                    white-space: pre-wrap;
+                    font-family: monospace;
+                    background-color: #f5f5f5;
+                    padding: 15px;
+                    border-radius: 5px;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                }
+                th, td {
+                    padding: 10px;
+                    border: 1px solid #ddd;
+                    text-align: left;
+                }
+                th {
+                    background-color: #f2f2f2;
+                }
+                .chart {
+                    margin: 20px 0;
+                    text-align: center;
+                }
+                .footer {
+                    margin-top: 30px;
+                    font-size: 0.8em;
+                    color: #777;
+                    text-align: center;
+                }
             </style>
         </head>
         <body>
             <div class="container">
+        """
+        
+        # 创建 header 部分
+        header = """
                 <div class="header">
                     <h1>增强西格尔策略信号通知</h1>
-                    <p>生成时间: {generated_time}</p>
+                    <p>生成时间: """ + generated_time + """</p>
                 </div>
-                
+        """
+        
+        # 创建信号框
+        signal_box = """
                 <div class="signal-box">
-                    <h2 style="color: {signal_color};">{signal_type}</h2>
+                    <h2 style="color: """ + signal_color + """;">""" + signal_type + """</h2>
                     <table>
                         <tr>
                             <th>信号强度</th>
-                            <td>{signal_value:.2f}</td>
+                            <td>""" + f"{signal_value:.2f}" + """</td>
                             <th>建议仓位</th>
-                            <td>{position:.2f}</td>
+                            <td>""" + f"{position:.2f}" + """</td>
                         </tr>
                         <tr>
                             <th>当前价格</th>
-                            <td>{close_price:.2f}</td>
+                            <td>""" + f"{close_price:.2f}" + """</td>
                             <th>价格/45周均线</th>
-                            <td>{price_vs_ma:.2f}%</td>
+                            <td>""" + f"{price_vs_ma:.2f}" + """%</td>
                         </tr>
                     </table>
                 </div>
-                
+        """
+        
+        # 创建报告部分
+        report_section = """
                 <h2>详细报告</h2>
                 <div class="report">
-                    {report_text.replace('\n', '<br>')}
+                    """ + report_text.replace('\n', '<br>') + """
                 </div>
-                
+        """
+        
+        # 创建图表部分
+        chart_section = """
                 <div class="chart">
                     <h2>策略图表</h2>
                     <img src="cid:strategy_chart" alt="策略表现图表" style="max-width:100%;">
                 </div>
-                
+        """
+        
+        # 创建页脚
+        footer = """
                 <div class="footer">
                     <p>此邮件由增强西格尔策略自动生成，请勿直接回复。</p>
-                    <p>© {current_year} 增强西格尔策略 - GitHub Actions 自动化通知系统</p>
+                    <p>© """ + current_year + """ 增强西格尔策略 - GitHub Actions 自动化通知系统</p>
                 </div>
             </div>
         </body>
         </html>
         """
         
-        return html
+        # 拼接所有部分
+        complete_html = html_head + header + signal_box + report_section + chart_section + footer
+        
+        return complete_html
