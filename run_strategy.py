@@ -161,6 +161,16 @@ def create_config_template(config_file: str = 'config.ini') -> None:
     logger.info(f"已创建配置文件模板 {config_file}")
 
 
+def is_github_actions() -> bool:
+    """
+    检查是否在GitHub Actions环境中运行
+    
+    Returns:
+        是否在GitHub Actions中运行
+    """
+    return os.environ.get('GITHUB_ACTIONS') == 'true'
+
+
 def main():
     """主函数"""
     # 解析命令行参数
@@ -180,6 +190,10 @@ def main():
     config = load_config(args.config)
     
     try:
+        # 确保数据和图表目录存在
+        os.makedirs(config['data_dir'], exist_ok=True)
+        os.makedirs(config['charts_dir'], exist_ok=True)
+        
         # 1. 初始化数据加载器
         data_loader = DataLoader(config)
         
@@ -237,7 +251,7 @@ def main():
         
         # 11. 生成信号报告
         report_text = signal_analyzer.generate_signal_report(latest_signal, position_summary)
-        logger.info("\n" + report_text)
+        logger.info("信号报告:\n" + report_text)
         
         # 12. 生成图表
         chart_path = os.path.join(config['charts_dir'], f"strategy_chart_{datetime.now().strftime('%Y%m%d')}.png")
@@ -247,11 +261,13 @@ def main():
         interactive_chart_path = os.path.join(config['charts_dir'], f"interactive_chart_{datetime.now().strftime('%Y%m%d')}.html")
         signal_analyzer.plot_interactive_chart(results_df.tail(156), interactive_chart_path)
         
-        # 13. 发送邮件通知（如果配置了邮件且未禁用）
-        if not args.no_email and all([config.get('email_sender'), config.get('email_password'), config.get('email_recipient')]):
+        # 13. 发送邮件通知（如果配置了邮件且未禁用，且不是在GitHub Actions中运行）
+        if not args.no_email and all([config.get('email_sender'), config.get('email_password'), config.get('email_recipient')]) and not is_github_actions():
             logger.info("发送邮件通知")
             notifier = EmailNotifier(config)
             notifier.send_signal_email(latest_signal, report_text, chart_path)
+        elif is_github_actions():
+            logger.info("在GitHub Actions环境中运行，邮件将由GitHub Actions发送")
         
         logger.info("策略执行完成")
         
