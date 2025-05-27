@@ -84,14 +84,15 @@ class SignalAnalyzer:
             position_history: 包含仓位历史的DataFrame
             
         Returns:
-            包含仓位摘要的字典
+            包含仓位摘要信息的字典
         """
         if position_history.empty:
+            logger.warning("仓位历史为空，无法生成摘要")
             return {
-                "current_position": 0,
-                "last_change_date": None,
-                "days_since_change": None,
-                "position_trend": "无历史数据"
+                "current_position": 0.0,
+                "last_change_date": pd.Timestamp.now().normalize(),
+                "days_since_change": 0,
+                "position_trend": "无数据"
             }
         
         # 获取最新仓位
@@ -103,7 +104,14 @@ class SignalAnalyzer:
         
         if len(changes) > 0:
             last_change_date = changes.index[-1]
-            days_since_change = (pd.Timestamp.now() - last_change_date).days
+            # 确保时区一致性
+            if last_change_date.tzinfo is not None:
+                now = pd.Timestamp.now(tz=last_change_date.tzinfo)
+            else:
+                now = pd.Timestamp.now().normalize()
+                last_change_date = last_change_date.normalize()
+            
+            days_since_change = (now - last_change_date).days
             
             # 分析最近的仓位趋势
             recent_changes = changes.tail(3)
@@ -121,7 +129,14 @@ class SignalAnalyzer:
                 position_trend = "数据不足"
         else:
             last_change_date = position_history.index[0]
-            days_since_change = (pd.Timestamp.now() - last_change_date).days
+            # 确保时区一致性
+            if last_change_date.tzinfo is not None:
+                now = pd.Timestamp.now(tz=last_change_date.tzinfo)
+            else:
+                now = pd.Timestamp.now().normalize()
+                last_change_date = last_change_date.normalize()
+                
+            days_since_change = (now - last_change_date).days
             position_trend = "无变化"
         
         return {

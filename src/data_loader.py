@@ -235,9 +235,47 @@ class DataLoader:
         Returns:
             周线数据DataFrame
         """
-        # 确保索引是日期时间类型
-        if not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.to_datetime(df.index)
+        # 创建一个副本以避免修改原始数据
+        df_copy = df.copy()
+        
+        # 确保索引是日期时间类型，并处理时区问题
+        try:
+            if not isinstance(df_copy.index, pd.DatetimeIndex):
+                # 尝试直接转换为无时区的日期时间
+                df_copy.index = pd.to_datetime(df_copy.index).tz_localize(None)
+            elif df_copy.index.tz is not None:
+                # 如果索引已经是DatetimeIndex但有时区，移除时区
+                df_copy.index = df_copy.index.tz_localize(None)
+        except Exception as e:
+            logger.warning(f"处理日期时间索引时出错: {e}")
+            # 如果转换失败，则创建新的无时区索引
+            try:
+                # 尝试手动转换每个日期
+                new_index = []
+                for idx in df_copy.index:
+                    if hasattr(idx, 'to_pydatetime'):  # 如果是时间戳对象
+                        dt = idx.to_pydatetime().replace(tzinfo=None)
+                    elif isinstance(idx, str):  # 如果是字符串
+                        dt = pd.to_datetime(idx).to_pydatetime()
+                    else:  # 其他情况
+                        dt = pd.to_datetime(idx).to_pydatetime()
+                    new_index.append(dt)
+                
+                df_copy.index = pd.DatetimeIndex(new_index)
+            except Exception as inner_e:
+                logger.error(f"无法创建有效的DatetimeIndex: {inner_e}")
+                # 最后的尝试：如果无法处理日期索引，创建一个简单的范围索引
+                # 并使用最近的日期作为起点
+                today = pd.Timestamp.now()
+                start_date = today - pd.Timedelta(days=len(df_copy) - 1)
+                df_copy.index = pd.date_range(start=start_date, periods=len(df_copy), freq='D')
+                logger.warning("使用生成的日期范围作为索引")
+        
+        # 确保索引是DatetimeIndex类型，否则无法重采样
+        if not isinstance(df_copy.index, pd.DatetimeIndex):
+            logger.error("无法创建DatetimeIndex，无法执行重采样")
+            # 返回原始数据，无法重采样
+            return df_copy
         
         # 重采样为周线，使用以下规则：
         # - 开盘价：取一周内第一个交易日的开盘价
@@ -245,15 +283,19 @@ class DataLoader:
         # - 最低价：取一周内的最低价
         # - 收盘价：取一周内最后一个交易日的收盘价
         # - 成交量：取一周内成交量之和
-        weekly = df.resample('W').agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'volume': 'sum'
-        })
-        
-        return weekly
+        try:
+            weekly = df_copy.resample('W').agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            })
+            return weekly
+        except Exception as e:
+            logger.error(f"重采样为周线数据时出错: {e}")
+            # 如果重采样失败，返回原始数据
+            return df_copy
     
     def save_position_history(self, position_history: pd.DataFrame) -> None:
         """

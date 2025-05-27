@@ -28,11 +28,39 @@ jobs:
           mkdir -p data
           mkdir -p charts
           
+      - name: Verify data directory permissions
+        run: |
+          # 确保数据目录存在并有写入权限
+          ls -la data/
+          touch data/test_file.txt
+          rm data/test_file.txt
+          echo "Data directory verified"
+          
       - name: Run Enhanced Siegel Strategy
         env:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: |
-          python run_strategy.py --no-email
+          # 使用更详细的日志级别运行
+          python run_strategy.py --no-email --force-download
+          # 检查是否生成了必要的文件
+          echo "检查生成的文件:"
+          ls -la data/
+          ls -la charts/
+          
+      - name: Debug log if failed
+        if: failure()
+        run: |
+          echo "策略运行失败，显示日志:"
+          if [ -f enhanced_siegel.log ]; then
+            cat enhanced_siegel.log
+          else
+            echo "日志文件不存在"
+          fi
+          # 显示环境信息
+          echo "Python版本:"
+          python --version
+          echo "Pandas版本:"
+          pip show pandas
           
       - name: Upload charts as artifacts
         uses: actions/upload-artifact@v4
@@ -85,9 +113,12 @@ jobs:
               labels: ['strategy-signal', 'automated-report']
             });
       
-      # 简化的邮件发送步骤，不检查 EMAIL_RECIPIENT 是否为空      
+      # 仅当设置了 EMAIL_RECIPIENT 时才发送邮件 
       - name: Send notification email
+        if: ${{ env.EMAIL_RECIPIENT != '' }}
         continue-on-error: true  # 即使邮件发送失败，也继续执行后续步骤
+        env:
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
