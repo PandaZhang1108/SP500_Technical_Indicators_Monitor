@@ -11,7 +11,7 @@ import sys
 import logging
 import configparser
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import argparse
 from typing import Dict, Any
 
@@ -218,7 +218,6 @@ def main():
         if daily_data.empty:
             logger.warning("无法获取 {} 的数据，创建示例数据以便继续运行".format(config['symbol']))
             # 创建一个假的数据集，包含必要的字段
-            from datetime import datetime, timedelta
             import numpy as np
             
             # 创建基本的日期范围
