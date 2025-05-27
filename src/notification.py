@@ -159,71 +159,83 @@ class EmailNotifier:
         else:
             signal_color = "blue"
         
-        # 创建HTML正文
+        # 创建样式 CSS
+        css = """
+            body {
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+            }
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            .header {
+                background-color: #f5f5f5;
+                padding: 15px;
+                border-bottom: 2px solid #ddd;
+                margin-bottom: 20px;
+            }
+            .signal-box {
+                padding: 15px;
+                margin-bottom: 20px;
+                border-radius: 5px;
+                background-color: #f9f9f9;
+                border-left: 5px solid """ + signal_color + """;
+            }
+            .report {
+                white-space: pre-wrap;
+                font-family: monospace;
+                background-color: #f5f5f5;
+                padding: 15px;
+                border-radius: 5px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+            }
+            th, td {
+                padding: 10px;
+                border: 1px solid #ddd;
+                text-align: left;
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            .chart {
+                margin: 20px 0;
+                text-align: center;
+            }
+            .footer {
+                margin-top: 30px;
+                font-size: 0.8em;
+                color: #777;
+                text-align: center;
+            }
+        """
+        
+        # 计算价格相对45周均线百分比
+        price_vs_ma = (close_price/signal_info['ma_long'] - 1) * 100
+        
+        # 生成时间
+        generated_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        current_year = datetime.now().year
+        
+        # 创建HTML正文内容
         html = f"""
         <html>
         <head>
             <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                }}
-                .container {{
-                    max-width: 800px;
-                    margin: 0 auto;
-                    padding: 20px;
-                }}
-                .header {{
-                    background-color: #f5f5f5;
-                    padding: 15px;
-                    border-bottom: 2px solid #ddd;
-                    margin-bottom: 20px;
-                }}
-                .signal-box {{
-                    padding: 15px;
-                    margin-bottom: 20px;
-                    border-radius: 5px;
-                    background-color: #f9f9f9;
-                    border-left: 5px solid {signal_color};
-                }}
-                .report {{
-                    white-space: pre-wrap;
-                    font-family: monospace;
-                    background-color: #f5f5f5;
-                    padding: 15px;
-                    border-radius: 5px;
-                }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-bottom: 20px;
-                }}
-                th, td {{
-                    padding: 10px;
-                    border: 1px solid #ddd;
-                    text-align: left;
-                }}
-                th {{
-                    background-color: #f2f2f2;
-                }}
-                .chart {{
-                    margin: 20px 0;
-                    text-align: center;
-                }}
-                .footer {{
-                    margin-top: 30px;
-                    font-size: 0.8em;
-                    color: #777;
-                    text-align: center;
-                }}
+            {css}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
                     <h1>增强西格尔策略信号通知</h1>
-                    <p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <p>生成时间: {generated_time}</p>
                 </div>
                 
                 <div class="signal-box">
@@ -239,7 +251,7 @@ class EmailNotifier:
                             <th>当前价格</th>
                             <td>{close_price:.2f}</td>
                             <th>价格/45周均线</th>
-                            <td>{(close_price/signal_info['ma_long'] - 1) * 100:.2f}%</td>
+                            <td>{price_vs_ma:.2f}%</td>
                         </tr>
                     </table>
                 </div>
@@ -256,7 +268,7 @@ class EmailNotifier:
                 
                 <div class="footer">
                     <p>此邮件由增强西格尔策略自动生成，请勿直接回复。</p>
-                    <p>© {datetime.now().year} 增强西格尔策略 - GitHub Actions 自动化通知系统</p>
+                    <p>© {current_year} 增强西格尔策略 - GitHub Actions 自动化通知系统</p>
                 </div>
             </div>
         </body>

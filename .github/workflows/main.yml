@@ -45,7 +45,7 @@ jobs:
       - name: Read strategy report
         id: report
         run: |
-          REPORT=$(tail -n 20 enhanced_siegel.log | grep -A 20 "信号报告" || echo "No report found")
+          REPORT=$(tail -n 50 enhanced_siegel.log | grep -A 50 "信号报告" || echo "No report found")
           echo "report<<EOF" >> $GITHUB_ENV
           echo "$REPORT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -56,20 +56,61 @@ jobs:
           echo "signal_type=$SIGNAL_TYPE" >> $GITHUB_OUTPUT
           echo "position=$POSITION" >> $GITHUB_OUTPUT
           
-      - name: Send email notification
+      # 使用 GitHub Issues 作为通知方式，不需要邮箱配置
+      - name: Create GitHub Issue with Strategy Report
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const date = new Date().toISOString().split('T')[0];
+            const signalType = '${{ steps.report.outputs.signal_type }}' || '未知信号';
+            const position = '${{ steps.report.outputs.position }}' || '未知仓位';
+            
+            const title = `【增强西格尔策略】信号更新 - ${signalType} ${position} (${date})`;
+            const body = `## 增强西格尔策略监控报告
+            
+            ${process.env.report || '无报告内容'}
+            
+            ---
+            
+            *此报告由 GitHub Actions 自动生成于 ${new Date().toISOString()}*
+            *查看 [策略图表](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) 获取更多详情*`;
+            
+            // 创建 Issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['strategy-signal', 'automated-report']
+            });
+            
+      # 如果设置了收件人邮箱，则通过邮件发送报告（使用 GitHub 的服务）
+      - name: Send notification email
+        if: ${{ secrets.EMAIL_RECIPIENT != '' }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
-          username: ${{ secrets.EMAIL_SENDER }}
+          username: github-actions@github.com
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: 【增强西格尔策略】信号更新 - ${{ steps.report.outputs.signal_type }} ${{ steps.report.outputs.position }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
-          from: 增强西格尔策略监控 <${{ secrets.EMAIL_SENDER }}>
+          from: GitHub Actions <github-actions@github.com>
           body: |
-            增强西格尔策略监控报告
+            # 增强西格尔策略监控报告
             
             ${{ env.report }}
             
+            ---
+            
             此邮件由 GitHub Actions 自动发送，请勿回复。
-          attachments: charts/strategy_chart_*.png
+            查看 GitHub 仓库获取更多详情：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          html_body: |
+            <h1>增强西格尔策略监控报告</h1>
+            <pre>
+            ${{ env.report }}
+            </pre>
+            <hr>
+            <p>此邮件由 GitHub Actions 自动发送，请勿回复。</p>
+            <p><a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看 GitHub 仓库获取更多详情</a></p>
