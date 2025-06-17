@@ -73,7 +73,25 @@ def load_config(config_file: str = 'config.ini') -> Dict[str, Any]:
         'email_password': os.environ.get('EMAIL_PASSWORD', ''),
         'email_recipient': os.environ.get('EMAIL_RECIPIENT', ''),
         'smtp_server': 'smtp.gmail.com',
-        'smtp_port': 587
+        'smtp_port': 587,
+        # 添加策略参数的默认值
+        'ma_long': 45,
+        'ma_short': 20,
+        'rsi_period': 14,
+        'macd_fast': 12,
+        'macd_slow': 26,
+        'macd_signal': 9,
+        'adx_period': 14,
+        'atr_period': 14,
+        'atr_multiplier': 2.5,
+        'signal_threshold': 0.5,
+        'strong_signal': 0.75,
+        'very_strong_signal': 0.9,
+        'weak_signal': 0.65,
+        'trend_weight': 0.4,
+        'slope_weight': 0.25,
+        'momentum_weight': 0.2,
+        'environment_weight': 0.15
     }
     
     # 如果配置文件存在，则读取
@@ -84,18 +102,41 @@ def load_config(config_file: str = 'config.ini') -> Dict[str, Any]:
             
             # 读取策略配置
             if 'Strategy' in parser:
+                # 明确定义需要转换为int的参数
+                int_params = ['ma_long', 'ma_short', 'rsi_period', 'macd_fast', 'macd_slow', 'macd_signal', 'adx_period', 'atr_period']
+                # 明确定义需要转换为float的参数
+                float_params = ['atr_multiplier', 'signal_threshold', 'strong_signal', 'very_strong_signal', 'weak_signal', 'trend_weight', 'slope_weight', 'momentum_weight', 'environment_weight']
+                
                 for key in parser['Strategy']:
-                    # 尝试将数值转换为浮点数
                     try:
-                        config[key] = float(parser['Strategy'][key])
-                    except ValueError:
-                        config[key] = parser['Strategy'][key]
+                        if key in int_params:
+                            # 确保这些参数是整数
+                            config[key] = int(float(parser['Strategy'][key]))
+                            # 验证参数值是否有效
+                            if config[key] <= 0 and key not in ['atr_multiplier']:  # atr_multiplier可以是小数
+                                logger.warning(f"参数 {key} 的值 {config[key]} 无效，使用默认值")
+                                config[key] = int(config.get(key, 1))  # 使用默认值，最小为1
+                        elif key in float_params:
+                            # 转换为浮点数
+                            config[key] = float(parser['Strategy'][key])
+                        else:
+                            # 其他参数保持原样
+                            config[key] = parser['Strategy'][key]
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"转换参数 {key} 时出错: {e}，使用默认值")
             
             # 读取数据配置
             if 'Data' in parser:
                 for key in parser['Data']:
                     if key == 'lookback_years':
-                        config[key] = int(parser['Data'][key])
+                        try:
+                            config[key] = int(parser['Data'][key])
+                            if config[key] <= 0:
+                                config[key] = 10  # 使用默认值
+                                logger.warning(f"lookback_years 必须大于0，使用默认值 10")
+                        except (ValueError, TypeError):
+                            config[key] = 10
+                            logger.warning("无法将 lookback_years 转换为整数，使用默认值 10")
                     else:
                         config[key] = parser['Data'][key]
             
@@ -103,7 +144,11 @@ def load_config(config_file: str = 'config.ini') -> Dict[str, Any]:
             if 'Notification' in parser:
                 for key in parser['Notification']:
                     if key == 'smtp_port':
-                        config[key] = int(parser['Notification'][key])
+                        try:
+                            config[key] = int(parser['Notification'][key])
+                        except (ValueError, TypeError):
+                            config[key] = 587
+                            logger.warning("无法将 smtp_port 转换为整数，使用默认值 587")
                     else:
                         config[key] = parser['Notification'][key]
             
@@ -117,6 +162,9 @@ def load_config(config_file: str = 'config.ini') -> Dict[str, Any]:
     for env_var in ['FINNHUB_API_KEY', 'EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECIPIENT']:
         if os.environ.get(env_var):
             config[env_var.lower()] = os.environ.get(env_var)
+    
+    # 打印关键配置值用于调试(不包含敏感信息)
+    logger.debug(f"配置加载完成，关键参数: ma_long={config['ma_long']}, ma_short={config['ma_short']}, lookback_years={config['lookback_years']}")
     
     return config
 

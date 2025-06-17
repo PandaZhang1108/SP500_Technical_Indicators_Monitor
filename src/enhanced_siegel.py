@@ -46,7 +46,42 @@ class EnhancedSiegelStrategy:
         # 使用用户配置覆盖默认配置
         self.config = self.default_config.copy()
         if config:
+            # 确保必要的参数是整数
+            int_params = ['ma_long', 'ma_short', 'rsi_period', 'macd_fast', 'macd_slow', 'macd_signal', 'adx_period', 'atr_period']
+            for key in int_params:
+                if key in config:
+                    try:
+                        value = int(config[key])
+                        if value <= 0:
+                            print(f"警告: 参数 {key} 的值 {value} 必须大于0，使用默认值 {self.default_config[key]}")
+                            config[key] = self.default_config[key]
+                        else:
+                            config[key] = value
+                    except (ValueError, TypeError):
+                        print(f"警告: 参数 {key} 的值无法转换为整数，使用默认值 {self.default_config[key]}")
+                        config[key] = self.default_config[key]
+            
+            # 确保浮点数参数有效
+            float_params = ['atr_multiplier', 'signal_threshold', 'strong_signal', 'very_strong_signal', 'weak_signal', 'trend_weight', 'slope_weight', 'momentum_weight', 'environment_weight']
+            for key in float_params:
+                if key in config:
+                    try:
+                        config[key] = float(config[key])
+                    except (ValueError, TypeError):
+                        print(f"警告: 参数 {key} 的值无法转换为浮点数，使用默认值 {self.default_config[key]}")
+                        config[key] = self.default_config[key]
+            
+            # 更新配置
             self.config.update(config)
+        
+        # 确保关键参数存在且有效
+        for key in self.default_config:
+            if key not in self.config or self.config[key] is None:
+                print(f"警告: 参数 {key} 缺失，使用默认值 {self.default_config[key]}")
+                self.config[key] = self.default_config[key]
+        
+        # 打印关键参数用于调试
+        print(f"EnhancedSiegelStrategy 初始化: ma_long={self.config['ma_long']}, ma_short={self.config['ma_short']}")
     
     def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -60,42 +95,65 @@ class EnhancedSiegelStrategy:
         """
         df = data.copy()
         
-        # 1. 计算移动平均线
-        df[f'MA{self.config["ma_long"]}'] = df['close'].rolling(window=self.config['ma_long']).mean()
-        df[f'MA{self.config["ma_short"]}'] = df['close'].rolling(window=self.config['ma_short']).mean()
+        # 确保时间窗口参数有效
+        for param_name in ['ma_long', 'ma_short', 'rsi_period', 'macd_fast', 'macd_slow', 'macd_signal', 'adx_period', 'atr_period']:
+            if not isinstance(self.config[param_name], int) or self.config[param_name] <= 0:
+                print(f"错误: 参数 {param_name} 的值 {self.config[param_name]} 无效，必须是大于0的整数")
+                print(f"使用默认值: {self.default_config[param_name]}")
+                self.config[param_name] = self.default_config[param_name]
         
-        # 2. 计算短期MA斜率
-        df['MA_slope'] = df[f'MA{self.config["ma_short"]}'].diff(4) / df[f'MA{self.config["ma_short"]}'].shift(4)
+        try:
+            # 1. 计算移动平均线
+            ma_long = int(self.config['ma_long'])  # 确保是整数
+            ma_short = int(self.config['ma_short'])  # 确保是整数
+            
+            print(f"计算移动平均线: ma_long={ma_long}, ma_short={ma_short}")
+            df[f'MA{ma_long}'] = df['close'].rolling(window=ma_long).mean()
+            df[f'MA{ma_short}'] = df['close'].rolling(window=ma_short).mean()
+            
+            # 2. 计算短期MA斜率
+            df['MA_slope'] = df[f'MA{ma_short}'].diff(4) / df[f'MA{ma_short}'].shift(4)
+            
+            # 3. 计算RSI
+            rsi_period = int(self.config['rsi_period'])  # 确保是整数
+            delta = df['close'].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(window=rsi_period).mean()
+            avg_loss = loss.rolling(window=rsi_period).mean()
+            rs = avg_gain / avg_loss
+            df['RSI'] = 100 - (100 / (1 + rs))
+            
+            # 4. 计算MACD
+            macd_fast = int(self.config['macd_fast'])  # 确保是整数
+            macd_slow = int(self.config['macd_slow'])  # 确保是整数 
+            macd_signal = int(self.config['macd_signal'])  # 确保是整数
+            ema_fast = df['close'].ewm(span=macd_fast, adjust=False).mean()
+            ema_slow = df['close'].ewm(span=macd_slow, adjust=False).mean()
+            df['MACD'] = ema_fast - ema_slow
+            df['MACD_signal'] = df['MACD'].ewm(span=macd_signal, adjust=False).mean()
+            df['MACD_hist'] = df['MACD'] - df['MACD_signal']
+            
+            # 5. 计算ADX
+            # 简化版ADX计算
+            tr1 = abs(df['high'] - df['low'])
+            tr2 = abs(df['high'] - df['close'].shift(1))
+            tr3 = abs(df['low'] - df['close'].shift(1))
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            atr_period = int(self.config['atr_period'])  # 确保是整数
+            df['ATR'] = tr.rolling(window=atr_period).mean()
+            
+            # 简化版ADX
+            adx_period = int(self.config['adx_period'])  # 确保是整数
+            df['ADX'] = abs(df[f'MA{ma_short}'].diff(2) / df[f'MA{ma_short}'].shift(2) * 100).rolling(window=adx_period).mean()
+            
+            # 6. 计算波动率（基于ATR的相对波动率）
+            df['Volatility'] = df['ATR'] / df['close'] * 100
         
-        # 3. 计算RSI
-        delta = df['close'].diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(window=self.config['rsi_period']).mean()
-        avg_loss = loss.rolling(window=self.config['rsi_period']).mean()
-        rs = avg_gain / avg_loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # 4. 计算MACD
-        ema_fast = df['close'].ewm(span=self.config['macd_fast'], adjust=False).mean()
-        ema_slow = df['close'].ewm(span=self.config['macd_slow'], adjust=False).mean()
-        df['MACD'] = ema_fast - ema_slow
-        df['MACD_signal'] = df['MACD'].ewm(span=self.config['macd_signal'], adjust=False).mean()
-        df['MACD_hist'] = df['MACD'] - df['MACD_signal']
-        
-        # 5. 计算ADX
-        # 简化版ADX计算
-        tr1 = abs(df['high'] - df['low'])
-        tr2 = abs(df['high'] - df['close'].shift(1))
-        tr3 = abs(df['low'] - df['close'].shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        df['ATR'] = tr.rolling(window=self.config['atr_period']).mean()
-        
-        # 简化版ADX
-        df['ADX'] = abs(df[f'MA{self.config["ma_short"]}'].diff(2) / df[f'MA{self.config["ma_short"]}'].shift(2) * 100).rolling(window=self.config['adx_period']).mean()
-        
-        # 6. 计算波动率（基于ATR的相对波动率）
-        df['Volatility'] = df['ATR'] / df['close'] * 100
+        except Exception as e:
+            print(f"计算技术指标时出错: {str(e)}")
+            raise
         
         return df
     
