@@ -51,9 +51,10 @@ jobs:
           echo "检查生成的文件:"
           ls -la data/
           ls -la charts/
+        continue-on-error: true  # 即使策略运行失败，也继续执行后续步骤以发送错误通知
           
       - name: Debug log if failed
-        if: failure()
+        if: failure() || contains(github.step_state.failure, 'Run Enhanced Siegel Strategy')
         run: |
           echo "策略运行失败，显示日志:"
           if [ -f enhanced_siegel.log ]; then
@@ -68,6 +69,7 @@ jobs:
           pip show pandas
           
       - name: Upload charts as artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: strategy-charts
@@ -78,22 +80,43 @@ jobs:
       - name: Read strategy report
         id: report
         run: |
-          REPORT=$(tail -n 50 enhanced_siegel.log | grep -A 50 "信号报告" || echo "No report found")
-          echo "report<<EOF" >> $GITHUB_ENV
-          echo "$REPORT" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          # 提取信号类型和仓位
-          SIGNAL_TYPE=$(echo "$REPORT" | grep "信号类型" | cut -d':' -f2 || echo "未知信号")
-          POSITION=$(echo "$REPORT" | grep "建议仓位" | cut -d':' -f2 || echo "未知仓位")
-          echo "signal_type=$SIGNAL_TYPE" >> $GITHUB_OUTPUT
-          echo "position=$POSITION" >> $GITHUB_OUTPUT
+          if grep -q "数据获取错误" enhanced_siegel.log; then
+            # 如果有数据获取错误，设置特殊标记
+            echo "data_error=true" >> $GITHUB_OUTPUT
+            echo "signal_type=数据获取错误" >> $GITHUB_OUTPUT
+            echo "position=无法计算" >> $GITHUB_OUTPUT
+            
+            ERROR_REPORT=$(grep -A 10 "数据获取错误" enhanced_siegel.log || echo "无法获取真实市场数据")
+            echo "report<<EOF" >> $GITHUB_ENV
+            echo "$ERROR_REPORT" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          else
+            # 正常处理
+            REPORT=$(tail -n 50 enhanced_siegel.log | grep -A 50 "信号报告" || echo "No report found")
+            echo "report<<EOF" >> $GITHUB_ENV
+            echo "$REPORT" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            
+            # 提取信号类型和仓位
+            SIGNAL_TYPE=$(echo "$REPORT" | grep "信号类型" | cut -d':' -f2 || echo "未知信号")
+            POSITION=$(echo "$REPORT" | grep "建议仓位" | cut -d':' -f2 || echo "未知仓位")
+            echo "signal_type=$SIGNAL_TYPE" >> $GITHUB_OUTPUT
+            echo "position=$POSITION" >> $GITHUB_OUTPUT
+            echo "data_error=false" >> $GITHUB_OUTPUT
+          fi
           
           # 设置EMAIL_RECIPIENT环境变量(如果Secret已配置)
           if [ -n "${{ secrets.EMAIL_RECIPIENT }}" ]; then
             echo "EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}" >> $GITHUB_ENV
           else
             echo "未配置EMAIL_RECIPIENT，将不发送邮件通知"
+          fi
+          
+          # 如果是数据错误，强制发送通知
+          if [ "${{ steps.report.outputs.data_error }}" = "true" ]; then
+            echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
+            echo "将发送通知，因为发生了数据获取错误"
+            return 0
           fi
           
           # 检查信号是否发生变化
@@ -145,7 +168,7 @@ jobs:
             echo "不发送通知，因为信号和仓位都未发生变化"
           fi
       
-      # 使用 GitHub Issues 作为通知方式，只在信号或仓位变化时创建
+      # 使用 GitHub Issues 作为通知方式，只在信号或仓位变化时或有数据错误时创建
       - name: Create GitHub Issue with Strategy Report
         if: ${{ env.SHOULD_NOTIFY == 'true' }}
         uses: actions/github-script@v7
@@ -155,16 +178,31 @@ jobs:
             const date = new Date().toISOString().split('T')[0];
             const signalType = '${{ steps.report.outputs.signal_type }}' || '未知信号';
             const position = '${{ steps.report.outputs.position }}' || '未知仓位';
+            const isDataError = '${{ steps.report.outputs.data_error }}' === 'true';
             
-            const title = `【增强西格尔策略】信号更新 - ${signalType} ${position} (${date})`;
-            const body = `## 增强西格尔策略监控报告
+            let title, body;
             
-            ${process.env.report || '无报告内容'}
-            
-            ---
-            
-            *此报告由 GitHub Actions 自动生成于 ${new Date().toISOString()}*
-            *查看 [策略图表](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) 获取更多详情*`;
+            if (isDataError) {
+              title = `【数据错误】增强西格尔策略 - 无法获取市场数据 (${date})`;
+              body = `## 增强西格尔策略数据获取错误
+              
+              ${process.env.report || '无法获取真实市场数据，请检查数据源和网络连接。'}
+              
+              ---
+              
+              *此错误报告由 GitHub Actions 自动生成于 ${new Date().toISOString()}*
+              *请尽快检查数据源并解决问题*`;
+            } else {
+              title = `【增强西格尔策略】信号更新 - ${signalType} ${position} (${date})`;
+              body = `## 增强西格尔策略监控报告
+              
+              ${process.env.report || '无报告内容'}
+              
+              ---
+              
+              *此报告由 GitHub Actions 自动生成于 ${new Date().toISOString()}*
+              *查看 [策略图表](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) 获取更多详情*`;
+            }
             
             // 创建 Issue
             await github.rest.issues.create({
@@ -172,7 +210,7 @@ jobs:
               repo: context.repo.repo,
               title: title,
               body: body,
-              labels: ['strategy-signal', 'automated-report']
+              labels: isDataError ? ['data-error', 'urgent'] : ['strategy-signal', 'automated-report']
             });
 
       # 检查SMTP配置的完整性
@@ -207,31 +245,32 @@ jobs:
         continue-on-error: true  # 即使邮件发送失败，也继续执行后续步骤
         env:
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+          DATA_ERROR: ${{ steps.report.outputs.data_error }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_SERVER }}
           server_port: ${{ secrets.SMTP_PORT }}
           username: ${{ secrets.EMAIL_SENDER }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: 【增强西格尔策略】重要信号更新 - ${{ steps.report.outputs.signal_type }} ${{ steps.report.outputs.position }}
+          subject: ${{ steps.report.outputs.data_error == 'true' && '【数据错误警报】增强西格尔策略 - 无法获取市场数据' || format('【增强西格尔策略】重要信号更新 - {0} {1}', steps.report.outputs.signal_type, steps.report.outputs.position) }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: GitHub Actions <${{ secrets.EMAIL_SENDER }}>
           body: |
-            # 增强西格尔策略监控报告 - 信号变化提醒
+            ${{ env.DATA_ERROR == 'true' && '# 增强西格尔策略数据获取错误' || '# 增强西格尔策略监控报告 - 信号变化提醒' }}
             
             ${{ env.report }}
             
             ---
             
-            此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。
+            ${{ env.DATA_ERROR == 'true' && '此邮件由 GitHub Actions 自动发送，表明无法获取真实市场数据。请尽快检查数据源并解决问题。' || '此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。' }}
             查看 GitHub 仓库获取更多详情：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           html_body: |
-            <h1>增强西格尔策略监控报告 - 信号变化提醒</h1>
+            <h1>${{ env.DATA_ERROR == 'true' && '增强西格尔策略数据获取错误' || '增强西格尔策略监控报告 - 信号变化提醒' }}</h1>
             <pre>
             ${{ env.report }}
             </pre>
             <hr>
-            <p>此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。</p>
+            <p>${{ env.DATA_ERROR == 'true' && '此邮件由 GitHub Actions 自动发送，表明无法获取真实市场数据。请尽快检查数据源并解决问题。' || '此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。' }}</p>
             <p><a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看 GitHub 仓库获取更多详情</a></p>
 
       # 添加邮件发送后的日志输出

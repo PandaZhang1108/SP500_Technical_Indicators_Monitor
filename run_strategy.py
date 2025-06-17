@@ -264,31 +264,49 @@ def main():
         
         # 检查是否成功获取数据
         if daily_data.empty:
-            logger.warning("无法获取 {} 的数据，创建示例数据以便继续运行".format(config['symbol']))
-            # 创建一个假的数据集，包含必要的字段
-            import numpy as np
+            error_message = "无法获取 {} 的真实市场数据，请检查数据源和网络连接。".format(config['symbol'])
+            logger.error(error_message)
             
-            # 创建基本的日期范围
-            dates = [datetime.now() - timedelta(days=i) for i in range(365*2, 0, -1)]
+            # 发送错误通知邮件
+            if not args.no_email and EmailNotifier is not None:
+                email_config_valid = all([
+                    config.get('email_sender'), 
+                    config.get('email_password'), 
+                    config.get('email_recipient')
+                ])
+                
+                if email_config_valid:
+                    logger.info("发送错误通知邮件")
+                    notifier = EmailNotifier(config)
+                    subject = "【数据获取错误】增强西格尔策略 - 无法获取市场数据"
+                    body = f"""
+                    # 增强西格尔策略数据获取错误
+                    
+                    无法获取 {config['symbol']} 的真实市场数据，请检查以下可能的原因：
+                    
+                    1. 网络连接问题
+                    2. API密钥是否有效（如果使用Finnhub）
+                    3. 数据提供商服务是否可用
+                    4. 市场是否休市或有其他特殊情况
+                    
+                    请手动检查数据来源并解决问题。
+                    
+                    错误发生时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    """
+                    notifier.send_email(subject, body)
             
-            # 创建示例数据
-            daily_data = pd.DataFrame({
-                'open': np.random.normal(100, 10, len(dates)),
-                'high': np.random.normal(105, 10, len(dates)),
-                'low': np.random.normal(95, 10, len(dates)),
-                'close': np.random.normal(100, 10, len(dates)),
-                'volume': np.random.normal(1000000, 200000, len(dates))
-            }, index=dates)
+            # 在GitHub Actions环境中也创建错误报告，方便查看
+            if is_github_actions():
+                error_report = f"""
+                数据获取错误
+                
+                无法获取 {config['symbol']} 的真实市场数据
+                
+                请检查数据源和网络连接。
+                """
+                logger.info("信号报告:\n" + error_report)
             
-            # 修正数据，确保 high >= open >= low, high >= close >= low
-            for i in range(len(daily_data)):
-                row = daily_data.iloc[i]
-                max_val = max(row['open'], row['close'])
-                min_val = min(row['open'], row['close'])
-                daily_data.iloc[i, daily_data.columns.get_loc('high')] = max(row['high'], max_val)
-                daily_data.iloc[i, daily_data.columns.get_loc('low')] = min(row['low'], min_val)
-            
-            logger.info("已创建示例数据，将继续执行策略")
+            sys.exit(1)  # 直接退出程序，不继续执行
         
         # 3. 将日线数据转换为周线数据
         weekly_data = data_loader.resample_to_weekly(daily_data)
