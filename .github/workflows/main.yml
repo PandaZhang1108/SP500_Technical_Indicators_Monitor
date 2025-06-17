@@ -95,9 +95,59 @@ jobs:
           else
             echo "未配置EMAIL_RECIPIENT，将不发送邮件通知"
           fi
+          
+          # 检查信号是否发生变化
+          LAST_SIGNAL_FILE="data/last_signal.txt"
+          SIGNAL_CHANGED="false"
+          
+          if [ -f $LAST_SIGNAL_FILE ]; then
+            LAST_SIGNAL=$(cat $LAST_SIGNAL_FILE)
+            if [ "$LAST_SIGNAL" != "$SIGNAL_TYPE" ]; then
+              echo "信号发生变化: $LAST_SIGNAL -> $SIGNAL_TYPE"
+              SIGNAL_CHANGED="true"
+            else
+              echo "信号未变化: $SIGNAL_TYPE"
+            fi
+          else
+            echo "首次运行，没有历史信号记录"
+            SIGNAL_CHANGED="true"
+          fi
+          
+          # 保存当前信号
+          echo "$SIGNAL_TYPE" > $LAST_SIGNAL_FILE
+          
+          # 检查仓位是否发生变化
+          LAST_POSITION_FILE="data/last_position.txt"
+          POSITION_CHANGED="false"
+          
+          if [ -f $LAST_POSITION_FILE ]; then
+            LAST_POSITION=$(cat $LAST_POSITION_FILE)
+            if [ "$LAST_POSITION" != "$POSITION" ]; then
+              echo "仓位发生变化: $LAST_POSITION -> $POSITION"
+              POSITION_CHANGED="true"
+            else
+              echo "仓位未变化: $POSITION"
+            fi
+          else
+            echo "首次运行，没有历史仓位记录"
+            POSITION_CHANGED="true"
+          fi
+          
+          # 保存当前仓位
+          echo "$POSITION" > $LAST_POSITION_FILE
+          
+          # 设置是否需要发送通知的环境变量
+          if [ "$SIGNAL_CHANGED" = "true" ] || [ "$POSITION_CHANGED" = "true" ]; then
+            echo "SHOULD_NOTIFY=true" >> $GITHUB_ENV
+            echo "将发送通知，因为信号或仓位发生了变化"
+          else
+            echo "SHOULD_NOTIFY=false" >> $GITHUB_ENV
+            echo "不发送通知，因为信号和仓位都未发生变化"
+          fi
       
-      # 使用 GitHub Issues 作为通知方式，不需要邮箱配置
+      # 使用 GitHub Issues 作为通知方式，只在信号或仓位变化时创建
       - name: Create GitHub Issue with Strategy Report
+        if: ${{ env.SHOULD_NOTIFY == 'true' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -127,7 +177,7 @@ jobs:
 
       # 检查SMTP配置的完整性
       - name: Check SMTP configuration
-        if: ${{ env.EMAIL_RECIPIENT != '' }}
+        if: ${{ env.EMAIL_RECIPIENT != '' && env.SHOULD_NOTIFY == 'true' }}
         run: |
           # 检查SMTP配置是否完整
           if [ -z "${{ secrets.SMTP_SERVER }}" ]; then
@@ -151,9 +201,9 @@ jobs:
           
           echo "📧 邮件配置检查完成"
       
-      # 仅当设置了 EMAIL_RECIPIENT 时才发送邮件 
+      # 仅当设置了 EMAIL_RECIPIENT 且信号或仓位发生变化时才发送邮件
       - name: Send notification email
-        if: ${{ env.EMAIL_RECIPIENT != '' }}
+        if: ${{ env.EMAIL_RECIPIENT != '' && env.SHOULD_NOTIFY == 'true' }}
         continue-on-error: true  # 即使邮件发送失败，也继续执行后续步骤
         env:
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
@@ -163,33 +213,46 @@ jobs:
           server_port: ${{ secrets.SMTP_PORT }}
           username: ${{ secrets.EMAIL_SENDER }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: 【增强西格尔策略】信号更新 - ${{ steps.report.outputs.signal_type }} ${{ steps.report.outputs.position }}
+          subject: 【增强西格尔策略】重要信号更新 - ${{ steps.report.outputs.signal_type }} ${{ steps.report.outputs.position }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: GitHub Actions <${{ secrets.EMAIL_SENDER }}>
           body: |
-            # 增强西格尔策略监控报告
+            # 增强西格尔策略监控报告 - 信号变化提醒
             
             ${{ env.report }}
             
             ---
             
-            此邮件由 GitHub Actions 自动发送，请勿回复。
+            此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。
             查看 GitHub 仓库获取更多详情：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           html_body: |
-            <h1>增强西格尔策略监控报告</h1>
+            <h1>增强西格尔策略监控报告 - 信号变化提醒</h1>
             <pre>
             ${{ env.report }}
             </pre>
             <hr>
-            <p>此邮件由 GitHub Actions 自动发送，请勿回复。</p>
+            <p>此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。</p>
             <p><a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看 GitHub 仓库获取更多详情</a></p>
 
       # 添加邮件发送后的日志输出
       - name: Log email sending status
-        if: ${{ env.EMAIL_RECIPIENT != '' }}
+        if: ${{ env.EMAIL_RECIPIENT != '' && env.SHOULD_NOTIFY == 'true' }}
         run: |
           echo "邮件发送尝试完成"
           echo "如果您没有收到邮件，请检查以下几点："
           echo "1. SMTP_SERVER 和 SMTP_PORT 配置是否正确"
           echo "2. 如果使用Gmail，确保EMAIL_PASSWORD是应用专用密码"
           echo "3. 检查邮件接收方的垃圾邮件文件夹"
+      
+      # 显示运行结果摘要，即使没有发送通知也会显示
+      - name: Show run summary
+        run: |
+          echo "策略运行于 $(date)"
+          echo "当前信号类型: ${{ steps.report.outputs.signal_type }}"
+          echo "建议仓位: ${{ steps.report.outputs.position }}"
+          
+          if [ "$SHOULD_NOTIFY" = "true" ]; then
+            echo "✅ 信号或仓位发生变化，已发送通知"
+          else
+            echo "ℹ️ 信号和仓位未发生变化，未发送通知"
+          fi
