@@ -5,3 +5,4 @@ finnhub-python
 yfinance
 scikit-learn
 plotly
+akshare

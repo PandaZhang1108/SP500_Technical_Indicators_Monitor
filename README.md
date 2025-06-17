@@ -44,16 +44,14 @@ python run_strategy.py
 
 在你的 GitHub 仓库中，需要设置以下 Secrets：
 
-1. 打开你的 GitHub 仓库
-2. 点击 `Settings` -> `Secrets and variables` -> `Actions`
-3. 点击 `New repository secret` 添加以下 Secrets：
-
 | 名称 | 说明 |
 |------|------|
 | `FINNHUB_API_KEY` | Finnhub API 密钥（可选，不设置会使用默认值或 Yahoo Finance） |
 | `EMAIL_SENDER` | 发件人邮箱地址（用于 GitHub Actions 发送邮件） |
 | `EMAIL_PASSWORD` | 发件人邮箱密码（Gmail 需使用应用专用密码） |
 | `EMAIL_RECIPIENT` | 收件人邮箱地址（接收策略信号通知） |
+| `SMTP_SERVER` | SMTP服务器地址（例如`smtp.gmail.com`或`smtp.qq.com`） |
+| `SMTP_PORT` | SMTP服务器端口（例如Gmail SSL为465，TLS为587；QQ邮箱SSL为465） |
 
 #### 自动运行
 
@@ -229,10 +227,45 @@ python run_strategy.py --force-download --no-email
 - `EMAIL_PASSWORD`: 邮箱应用专用密码
 - `EMAIL_RECIPIENT`: 接收通知的邮箱地址
 - `FINNHUB_API_KEY`: Finnhub API密钥（可选，如果不设置将使用配置文件中的密钥）
+- `SMTP_SERVER`: SMTP服务器地址（例如`smtp.gmail.com`或`smtp.qq.com`）
+- `SMTP_PORT`: SMTP服务器端口（例如Gmail SSL为465，TLS为587；QQ邮箱SSL为465）
+
+#### 关于邮箱配置的特别说明
+
+##### Gmail配置
+
+如果使用Gmail发送邮件，需要：
+1. 在Gmail账户中开启两步验证：[Google账户安全设置](https://myaccount.google.com/security)
+2. 创建应用专用密码：[应用密码](https://myaccount.google.com/apppasswords)
+3. 在GitHub Secrets中设置：
+   - `EMAIL_SENDER`: 你的Gmail地址（例如：your.email@gmail.com）
+   - `EMAIL_PASSWORD`: 应用专用密码（不是Gmail登录密码）
+   - `SMTP_SERVER`: smtp.gmail.com
+   - `SMTP_PORT`: 465（SSL）或587（TLS）
+
+##### QQ邮箱配置
+
+如果使用QQ邮箱发送邮件，需要：
+1. 在QQ邮箱设置中开启POP3/SMTP服务
+2. 获取授权码（不是QQ登录密码）
+3. 在GitHub Secrets中设置：
+   - `EMAIL_SENDER`: 你的QQ邮箱地址（例如：12345678@qq.com）
+   - `EMAIL_PASSWORD`: QQ邮箱授权码
+   - `SMTP_SERVER`: smtp.qq.com
+   - `SMTP_PORT`: 465
+
+##### 常见问题排查
+
+如果没有收到邮件通知，请检查：
+1. GitHub Actions运行日志中是否有邮件发送错误
+2. 检查垃圾邮件文件夹
+3. 确认邮箱密码是否正确（授权码或应用专用密码）
+4. 确认SMTP服务器和端口配置是正确的
+5. 如果使用Gmail，检查Gmail账户是否有"不太安全的应用"设置限制
 
 ### 3. 启用GitHub Actions
 
-在仓库的`Actions`选项卡中启用工作流。工作流将按照`.github/workflows/strategy.yml`文件中的配置定期运行（默认为每周一上午9点）。
+在仓库的`Actions`选项卡中启用工作流。工作流将按照`.github/workflows/main.yml`文件中的配置定期运行（默认为每周一至周五美国市场收盘后）。
 
 您也可以手动触发工作流运行。
 

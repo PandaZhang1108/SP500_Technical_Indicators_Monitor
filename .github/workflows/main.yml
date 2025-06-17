@@ -89,6 +89,13 @@ jobs:
           echo "signal_type=$SIGNAL_TYPE" >> $GITHUB_OUTPUT
           echo "position=$POSITION" >> $GITHUB_OUTPUT
           
+          # 设置EMAIL_RECIPIENT环境变量(如果Secret已配置)
+          if [ -n "${{ secrets.EMAIL_RECIPIENT }}" ]; then
+            echo "EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}" >> $GITHUB_ENV
+          else
+            echo "未配置EMAIL_RECIPIENT，将不发送邮件通知"
+          fi
+      
       # 使用 GitHub Issues 作为通知方式，不需要邮箱配置
       - name: Create GitHub Issue with Strategy Report
         uses: actions/github-script@v7
@@ -117,6 +124,32 @@ jobs:
               body: body,
               labels: ['strategy-signal', 'automated-report']
             });
+
+      # 检查SMTP配置的完整性
+      - name: Check SMTP configuration
+        if: ${{ env.EMAIL_RECIPIENT != '' }}
+        run: |
+          # 检查SMTP配置是否完整
+          if [ -z "${{ secrets.SMTP_SERVER }}" ]; then
+            echo "⚠️ 警告: SMTP_SERVER 未配置，将使用默认值 smtp.gmail.com"
+            echo "SMTP_SERVER=smtp.gmail.com" >> $GITHUB_ENV
+          fi
+          
+          if [ -z "${{ secrets.SMTP_PORT }}" ]; then
+            echo "⚠️ 警告: SMTP_PORT 未配置，将使用默认值 465"
+            echo "SMTP_PORT=465" >> $GITHUB_ENV
+          fi
+          
+          if [ -z "${{ secrets.EMAIL_SENDER }}" ]; then
+            echo "⚠️ 警告: EMAIL_SENDER 未配置，将使用默认值 github-actions@github.com"
+            echo "EMAIL_SENDER=github-actions@github.com" >> $GITHUB_ENV
+          fi
+          
+          if [ -z "${{ secrets.EMAIL_PASSWORD }}" ]; then
+            echo "⚠️ 错误: EMAIL_PASSWORD 未配置，邮件发送可能会失败"
+          fi
+          
+          echo "📧 邮件配置检查完成"
       
       # 仅当设置了 EMAIL_RECIPIENT 时才发送邮件 
       - name: Send notification email
@@ -126,13 +159,13 @@ jobs:
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.EMAIL_SENDER || 'github-actions@github.com' }}
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.EMAIL_SENDER }}
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: 【增强西格尔策略】信号更新 - ${{ steps.report.outputs.signal_type }} ${{ steps.report.outputs.position }}
           to: ${{ secrets.EMAIL_RECIPIENT }}
-          from: GitHub Actions <${{ secrets.EMAIL_SENDER || 'github-actions@github.com' }}>
+          from: GitHub Actions <${{ secrets.EMAIL_SENDER }}>
           body: |
             # 增强西格尔策略监控报告
             
@@ -150,3 +183,13 @@ jobs:
             <hr>
             <p>此邮件由 GitHub Actions 自动发送，请勿回复。</p>
             <p><a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看 GitHub 仓库获取更多详情</a></p>
+
+      # 添加邮件发送后的日志输出
+      - name: Log email sending status
+        if: ${{ env.EMAIL_RECIPIENT != '' }}
+        run: |
+          echo "邮件发送尝试完成"
+          echo "如果您没有收到邮件，请检查以下几点："
+          echo "1. SMTP_SERVER 和 SMTP_PORT 配置是否正确"
+          echo "2. 如果使用Gmail，确保EMAIL_PASSWORD是应用专用密码"
+          echo "3. 检查邮件接收方的垃圾邮件文件夹"

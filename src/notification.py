@@ -95,10 +95,33 @@ class EmailNotifier:
             
             # 发送邮件
             context = ssl.create_default_context()
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                server.starttls(context=context)
-                server.login(self.sender_email, self.password)
-                server.send_message(msg)
+            
+            # 根据端口选择合适的连接方式
+            if self.smtp_port == 465:
+                # 使用SSL连接
+                with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context) as server:
+                    server.login(self.sender_email, self.password)
+                    # 使用sendmail替代send_message，避免连接关闭问题
+                    server.sendmail(self.sender_email, self.recipient_email, msg.as_string())
+                    
+                    # 安全关闭连接
+                    try:
+                        server.quit()
+                    except Exception as e:
+                        logger.warning(f"关闭SMTP连接时发生异常，但邮件已发送成功: {e}")
+            else:
+                # 使用STARTTLS
+                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                    server.starttls(context=context)
+                    server.login(self.sender_email, self.password)
+                    # 使用sendmail替代send_message，避免连接关闭问题
+                    server.sendmail(self.sender_email, self.recipient_email, msg.as_string())
+                    
+                    # 安全关闭连接
+                    try:
+                        server.quit()
+                    except Exception as e:
+                        logger.warning(f"关闭SMTP连接时发生异常，但邮件已发送成功: {e}")
             
             logger.info(f"已成功发送信号通知邮件至 {self.recipient_email}")
             return True

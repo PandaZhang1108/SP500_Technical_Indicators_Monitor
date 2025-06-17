@@ -43,6 +43,17 @@ class DataLoader:
         # 数据存储路径
         self.data_dir = config.get('data_dir', 'data')
         
+        # 新增配置项：是否使用本地数据
+        self.use_local_data = config.get('use_local_data', 'false').lower() == 'true'
+        self.local_data_file = config.get('local_data_file', '')
+        
+        # 备用标的
+        self.fallback_symbols = ['SPX', 'INX', 'SPY']
+        
+        # 数据缓存
+        self.data_cache = None
+        self.last_fetch_time = None
+        
         # 确保数据目录存在
         os.makedirs(self.data_dir, exist_ok=True)
     
@@ -329,3 +340,168 @@ class DataLoader:
                 return pd.DataFrame(columns=['position', 'signal_value', 'close', 'signal_type'])
         else:
             return pd.DataFrame(columns=['position', 'signal_value', 'close', 'signal_type'])
+
+    def get_data(self, force_refresh: bool = False) -> pd.DataFrame:
+        """
+        获取标普500数据
+        
+        Args:
+            force_refresh: 是否强制刷新数据
+            
+        Returns:
+            包含价格和指标数据的DataFrame
+        """
+        # 如果有缓存且不需要强制刷新，直接使用缓存
+        if self.data_cache is not None and not force_refresh:
+            # 如果最后获取时间在24小时内，使用缓存
+            if self.last_fetch_time and (datetime.now() - self.last_fetch_time).total_seconds() < 86400:
+                logger.info(f"使用缓存数据，缓存时间: {self.last_fetch_time}")
+                return self.data_cache
+        
+        # 尝试从不同来源获取数据
+        data = None
+        
+        # 1. 尝试从本地文件加载
+        if self.use_local_data and self.local_data_file:
+            data = self._load_from_local_file()
+        
+        # 2. 如果本地加载失败，尝试从Yahoo Finance获取
+        if data is None or len(data) == 0:
+            data = self._fetch_from_yahoo()
+        
+        # 3. 如果仍然失败，尝试备用标的
+        if data is None or len(data) == 0:
+            data = self._try_fallback_symbols()
+        
+        # 如果所有尝试都失败，记录错误
+        if data is None or len(data) == 0:
+            logger.error("无法获取数据，所有尝试均失败")
+            return pd.DataFrame()
+        
+        # 计算技术指标
+        data = self._calculate_indicators(data)
+        
+        # 缓存数据
+        self.data_cache = data
+        self.last_fetch_time = datetime.now()
+        
+        # 保存到本地
+        self._save_to_local_file(data)
+        
+        return data
+    
+    def _load_from_local_file(self) -> Optional[pd.DataFrame]:
+        """从本地文件加载数据"""
+        local_path = os.path.join(self.data_dir, self.local_data_file)
+        if not os.path.exists(local_path):
+            local_path = os.path.join(self.data_dir, f"{self.symbol.replace('^', '')}_weekly.csv")
+        
+        if os.path.exists(local_path):
+            try:
+                logger.info(f"从本地文件加载数据: {local_path}")
+                data = pd.read_csv(local_path, index_col=0, parse_dates=True)
+                logger.info(f"成功从本地文件加载 {len(data)} 条数据")
+                return data
+            except Exception as e:
+                logger.error(f"从本地文件加载数据失败: {e}")
+        
+        return None
+    
+    def _fetch_from_yahoo(self) -> Optional[pd.DataFrame]:
+        """从Yahoo Finance获取数据"""
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=365 * self.lookback_years)
+            
+            logger.info(f"从Yahoo Finance获取 {self.symbol} 数据...")
+            data = yf.download(self.symbol, start=start_date, end=end_date, interval="1wk")
+            
+            if len(data) > 0:
+                logger.info(f"成功获取 {len(data)} 条数据")
+                return data
+            else:
+                logger.warning(f"从Yahoo Finance获取数据成功，但数据为空")
+                return None
+        except Exception as e:
+            logger.error(f"从Yahoo Finance获取数据失败: {e}")
+            return None
+    
+    def _try_fallback_symbols(self) -> Optional[pd.DataFrame]:
+        """尝试使用备用标的"""
+        for symbol in self.fallback_symbols:
+            if symbol == self.symbol:
+                continue
+                
+            try:
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=365 * self.lookback_years)
+                
+                logger.info(f"尝试备用标的 {symbol}...")
+                data = yf.download(symbol, start=start_date, end=end_date, interval="1wk")
+                
+                if len(data) > 0:
+                    logger.info(f"成功获取备用标的 {symbol} 数据 {len(data)} 条")
+                    return data
+            except Exception as e:
+                logger.warning(f"获取备用标的 {symbol} 失败: {e}")
+        
+        return None
+    
+    def _save_to_local_file(self, data: pd.DataFrame) -> None:
+        """保存数据到本地文件"""
+        if len(data) == 0:
+            return
+            
+        # 如果没有指定本地文件名，使用默认格式
+        if not self.local_data_file:
+            self.local_data_file = f"{self.symbol.replace('^', '')}_weekly.csv"
+            
+        local_path = os.path.join(self.data_dir, self.local_data_file)
+        
+        try:
+            logger.info(f"保存数据到本地文件: {local_path}")
+            data.to_csv(local_path)
+            logger.info(f"成功保存 {len(data)} 条数据到本地文件")
+        except Exception as e:
+            logger.error(f"保存数据到本地文件失败: {e}")
+    
+    def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """计算基本技术指标"""
+        if len(data) == 0:
+            return data
+            
+        # 配置中的参数
+        ma_long = int(self.config.get('ma_long', 45))
+        ma_short = int(self.config.get('ma_short', 20))
+        rsi_period = int(self.config.get('rsi_period', 14))
+        
+        # 移动平均线
+        data['MA_Long'] = data['Close'].rolling(window=ma_long).mean()
+        data['MA_Short'] = data['Close'].rolling(window=ma_short).mean()
+        
+        # 计算RSI
+        delta = data['Close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(window=rsi_period).mean()
+        loss = -delta.where(delta < 0, 0).rolling(window=rsi_period).mean()
+        rs = gain / loss
+        data['RSI'] = 100 - (100 / (1 + rs))
+        
+        # 计算MACD
+        exp1 = data['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = data['Close'].ewm(span=26, adjust=False).mean()
+        data['MACD'] = exp1 - exp2
+        data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
+        data['MACD_Hist'] = data['MACD'] - data['MACD_Signal']
+        
+        # 计算ADX
+        high_low = data['High'] - data['Low']
+        high_close = abs(data['High'] - data['Close'].shift())
+        low_close = abs(data['Low'] - data['Close'].shift())
+        ranges = pd.concat([high_low, high_close, low_close], axis=1)
+        true_range = ranges.max(axis=1)
+        data['ATR'] = true_range.rolling(14).mean()
+        
+        # 删除NaN值
+        data = data.dropna()
+        
+        return data
