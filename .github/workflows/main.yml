@@ -92,7 +92,14 @@ jobs:
             echo "EOF" >> $GITHUB_ENV
           else
             # 正常处理
-            REPORT=$(tail -n 50 enhanced_siegel.log | grep -A 50 "信号报告" || echo "No report found")
+            # 打印日志文件的前几行和后几行，用于调试
+            echo "调试: 日志文件前20行"
+            head -n 20 enhanced_siegel.log
+            echo "调试: 日志文件后20行"
+            tail -n 20 enhanced_siegel.log
+            
+            # 使用grep -A 100增大捕获行数，确保捕获完整报告
+            REPORT=$(grep -A 100 "增强西格尔策略信号报告" enhanced_siegel.log || echo "No report found")
             echo "report<<EOF" >> $GITHUB_ENV
             echo "$REPORT" >> $GITHUB_ENV
             echo "EOF" >> $GITHUB_ENV
@@ -103,6 +110,10 @@ jobs:
             echo "signal_type=$SIGNAL_TYPE" >> $GITHUB_OUTPUT
             echo "position=$POSITION" >> $GITHUB_OUTPUT
             echo "data_error=false" >> $GITHUB_OUTPUT
+            
+            # 打印提取的信号类型和仓位，用于调试
+            echo "调试: 提取的信号类型 = $SIGNAL_TYPE"
+            echo "调试: 提取的仓位 = $POSITION"
           fi
           
           # 设置EMAIL_RECIPIENT环境变量(如果Secret已配置)
@@ -246,6 +257,7 @@ jobs:
         env:
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
           DATA_ERROR: ${{ steps.report.outputs.data_error }}
+          RUN_ID: ${{ github.run_id }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_SERVER }}
@@ -265,13 +277,25 @@ jobs:
             ${{ env.DATA_ERROR == 'true' && '此邮件由 GitHub Actions 自动发送，表明无法获取真实市场数据。请尽快检查数据源并解决问题。' || '此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。' }}
             查看 GitHub 仓库获取更多详情：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           html_body: |
-            <h1>${{ env.DATA_ERROR == 'true' && '增强西格尔策略数据获取错误' || '增强西格尔策略监控报告 - 信号变化提醒' }}</h1>
-            <pre>
+            <h1 style="color:#005f99;">${{ env.DATA_ERROR == 'true' && '增强西格尔策略数据获取错误' || '增强西格尔策略监控报告 - 信号变化提醒' }}</h1>
+            
+            <div style="background-color:#f8f9fa; padding:15px; border-left:4px solid #005f99; font-family: monospace; white-space: pre-wrap;">
             ${{ env.report }}
-            </pre>
-            <hr>
-            <p>${{ env.DATA_ERROR == 'true' && '此邮件由 GitHub Actions 自动发送，表明无法获取真实市场数据。请尽快检查数据源并解决问题。' || '此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。' }}</p>
-            <p><a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">查看 GitHub 仓库获取更多详情</a></p>
+            </div>
+            
+            <hr style="margin-top:20px; margin-bottom:20px; border:0; border-top:1px solid #eee;" />
+            
+            <p style="font-size:14px; color:#666;">
+            ${{ env.DATA_ERROR == 'true' && '此邮件由 GitHub Actions 自动发送，表明无法获取真实市场数据。请尽快检查数据源并解决问题。' || '此邮件由 GitHub Actions 自动发送，信号或仓位发生变化时才会通知，请勿回复。' }}
+            </p>
+            
+            <p style="font-size:14px; margin-top:10px;">
+            <a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" style="color:#0366d6; text-decoration:none;">查看 GitHub 仓库获取更多详情</a>
+            </p>
+            
+            <p style="font-size:12px; color:#999; margin-top:20px;">
+            运行ID: ${{ env.RUN_ID }} | 运行时间: ${{ github.event.repository.updated_at }}
+            </p>
 
       # 添加邮件发送后的日志输出
       - name: Log email sending status
